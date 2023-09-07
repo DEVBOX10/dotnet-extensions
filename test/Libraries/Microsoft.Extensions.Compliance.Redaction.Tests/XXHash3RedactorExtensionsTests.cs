@@ -1,13 +1,11 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Microsoft.Extensions.Compliance.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.Testing;
 using Xunit;
 
@@ -18,12 +16,10 @@ public class XXHash3RedactorExtensionsTests
     [Fact]
     public void DelegateBased()
     {
-        using var host = FakeHost.CreateBuilder(options => options.FakeRedaction = false)
-            .ConfigureRedaction((_, redaction) => redaction
-                .SetXXHash3Redactor(o => o.HashSeed = 101, SimpleClassifications.PrivateData))
-            .Build();
-
-        var redactorProvider = host.Services.GetRequiredService<IRedactorProvider>();
+        var redactorProvider = new ServiceCollection()
+            .AddRedaction(redaction => redaction.SetXXHash3Redactor(o => o.HashSeed = 101, SimpleClassifications.PrivateData))
+            .BuildServiceProvider()
+            .GetRequiredService<IRedactorProvider>();
 
         CheckProvider(redactorProvider);
     }
@@ -31,15 +27,15 @@ public class XXHash3RedactorExtensionsTests
     [Fact]
     public void HostBuilder_GivenXXHashRedactorWithConfigurationSectionConfig_RegistersItAsHashingRedactorAndRedacts()
     {
-        using var host = FakeHost.CreateBuilder(options => options.FakeRedaction = false)
-            .ConfigureRedaction((_, redaction) =>
+        var redactorProvider = new ServiceCollection()
+            .AddRedaction(redaction =>
             {
                 var section = GetRedactorConfiguration(new ConfigurationBuilder(), 101);
                 redaction.SetXXHash3Redactor(section, SimpleClassifications.PrivateData);
             })
-            .Build();
+            .BuildServiceProvider()
+            .GetRequiredService<IRedactorProvider>();
 
-        var redactorProvider = host.Services.GetRequiredService<IRedactorProvider>();
         CheckProvider(redactorProvider);
     }
 

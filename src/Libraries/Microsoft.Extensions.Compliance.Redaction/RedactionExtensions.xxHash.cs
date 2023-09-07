@@ -20,6 +20,12 @@ public static partial class RedactionExtensions
     /// <param name="classifications">The data classes for which the redactor type should be used.</param>
     /// <returns>The value of <paramref name="builder" />.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="builder"/>, <paramref name="configure" /> or <paramref name="classifications" /> are <see langword="null"/>.</exception>
+    /// <remarks>
+    /// The <see href="https://xxhash.com/">XXH3</see> algorithm is a high-quality high-performance
+    /// non-cryptographic hashing algorithm that produce a 64-bit value. Given the relatively small
+    /// hash space, it is possible to brute-force the hash value to find the original input value
+    /// using a rainbow table.
+    /// </remarks>
     public static IRedactionBuilder SetXXHash3Redactor(this IRedactionBuilder builder, Action<XXHash3RedactorOptions> configure, params DataClassification[] classifications)
     {
         _ = Throw.IfNull(builder);
