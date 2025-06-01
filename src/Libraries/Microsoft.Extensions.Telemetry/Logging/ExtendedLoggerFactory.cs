@@ -7,6 +7,9 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Microsoft.Extensions.Compliance.Classification;
 using Microsoft.Extensions.Compliance.Redaction;
+#if NET9_0_OR_GREATER
+using Microsoft.Extensions.Diagnostics.Buffering;
+#endif
 using Microsoft.Extensions.Diagnostics.Enrichment;
 using Microsoft.Extensions.Options;
 using Microsoft.Shared.Diagnostics;
@@ -23,6 +26,10 @@ internal sealed class ExtendedLoggerFactory : ILoggerFactory
     private readonly IDisposable? _enrichmentOptionsChangeTokenRegistration;
     private readonly IDisposable? _redactionOptionsChangeTokenRegistration;
     private readonly Action<IEnrichmentTagCollector>[] _enrichers;
+    private readonly LoggingSampler? _sampler;
+#if NET9_0_OR_GREATER
+    private readonly LogBuffer? _logBuffer;
+#endif
     private readonly KeyValuePair<string, object?>[] _staticTags;
     private readonly Func<DataClassificationSet, Redactor> _redactorProvider;
     private volatile bool _disposed;
@@ -35,14 +42,24 @@ internal sealed class ExtendedLoggerFactory : ILoggerFactory
         IEnumerable<ILogEnricher> enrichers,
         IEnumerable<IStaticLogEnricher> staticEnrichers,
         IOptionsMonitor<LoggerFilterOptions> filterOptions,
+        LoggingSampler? sampler = null,
         IOptions<LoggerFactoryOptions>? factoryOptions = null,
         IExternalScopeProvider? scopeProvider = null,
         IOptionsMonitor<LoggerEnrichmentOptions>? enrichmentOptions = null,
         IOptionsMonitor<LoggerRedactionOptions>? redactionOptions = null,
+#if NET9_0_OR_GREATER
+        IRedactorProvider? redactorProvider = null,
+        LogBuffer? logBuffer = null)
+#else
         IRedactorProvider? redactorProvider = null)
+#endif
 #pragma warning restore S107 // Methods should not have too many parameters
     {
         _scopeProvider = scopeProvider;
+#if NET9_0_OR_GREATER
+        _logBuffer = logBuffer;
+#endif
+        _sampler = sampler;
 
         _factoryOptions = factoryOptions == null || factoryOptions.Value == null ? new LoggerFactoryOptions() : factoryOptions.Value;
 
@@ -63,6 +80,16 @@ internal sealed class ExtendedLoggerFactory : ILoggerFactory
         _filterOptionsChangeTokenRegistration = filterOptions.OnChange(RefreshFilters);
         RefreshFilters(filterOptions.CurrentValue);
 
+        if (enrichmentOptions is null)
+        {
+            // enrichmentOptions is only present if EnableEnrichment was called, so if it's null
+            // then ignore all the supplied enrichers, we're not doing enrichment
+#pragma warning disable S1226
+            enrichers = [];
+            staticEnrichers = [];
+#pragma warning restore S1226
+        }
+
         _enrichers = enrichers.Select<ILogEnricher, Action<IEnrichmentTagCollector>>(e => e.Enrich).ToArray();
         _enrichmentOptionsChangeTokenRegistration = enrichmentOptions?.OnChange(UpdateEnrichmentOptions);
         _redactionOptionsChangeTokenRegistration = redactionOptions?.OnChange(UpdateRedactionOptions);
@@ -80,7 +107,7 @@ internal sealed class ExtendedLoggerFactory : ILoggerFactory
         }
 
         _staticTags = [.. tags];
-        Config = ComputeConfig(enrichmentOptions?.CurrentValue, redactionOptions?.CurrentValue);
+        Config = ComputeConfig(enrichmentOptions?.CurrentValue ?? new(), redactionOptions?.CurrentValue ?? new() { ApplyDiscriminator = false });
     }
 
     public void Dispose()
@@ -274,18 +301,24 @@ internal sealed class ExtendedLoggerFactory : ILoggerFactory
 
         return new(_staticTags,
                 _enrichers,
+                _sampler,
                 enrichmentOptions.CaptureStackTraces,
                 enrichmentOptions.UseFileInfoForStackTraces,
                 enrichmentOptions.IncludeExceptionMessage,
                 enrichmentOptions.MaxStackTraceLength,
                 _redactorProvider,
+#if NET9_0_OR_GREATER
+                redactionOptions.ApplyDiscriminator,
+                _logBuffer);
+#else
                 redactionOptions.ApplyDiscriminator);
+#endif
     }
 
     private void UpdateEnrichmentOptions(LoggerEnrichmentOptions enrichmentOptions) => Config = ComputeConfig(enrichmentOptions, null);
     private void UpdateRedactionOptions(LoggerRedactionOptions redactionOptions) => Config = ComputeConfig(null, redactionOptions);
 
-    private struct ProviderRegistration
+    public struct ProviderRegistration
     {
         public ILoggerProvider Provider;
         public bool ShouldDispose;

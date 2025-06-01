@@ -4,8 +4,10 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Threading;
+using Microsoft.Shared.DiagnosticIds;
 using Microsoft.Shared.Diagnostics;
 
 namespace Microsoft.Extensions.Time.Testing;
@@ -59,7 +61,7 @@ public class FakeTimeProvider : TimeProvider
     /// <remarks>
     /// This defaults to <see cref="TimeSpan.Zero"/>.
     /// </remarks>
-    /// <exception cref="ArgumentOutOfRangeException">The time value is set to less than <see cref="TimeSpan.Zero"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The time value is less than <see cref="TimeSpan.Zero"/>.</exception>
     public TimeSpan AutoAdvanceAmount
     {
         get => _autoAdvanceAmount;
@@ -86,10 +88,16 @@ public class FakeTimeProvider : TimeProvider
     }
 
     /// <summary>
-    /// Sets the date and time in the UTC time zone.
+    /// Advances the date and time in the UTC time zone.
     /// </summary>
     /// <param name="value">The date and time in the UTC time zone.</param>
     /// <exception cref="ArgumentOutOfRangeException">The supplied time value is before the current time.</exception>
+    /// <remarks>
+    /// This method simply advances time. If the time is set forward beyond the
+    /// trigger point of any outstanding timers, those timers will immediately trigger.
+    /// This is unlike the <see cref="AdjustTime" /> method, which has no impact
+    /// on timers.
+    /// </remarks>
     public void SetUtcNow(DateTimeOffset value)
     {
         lock (Waiters)
@@ -128,6 +136,31 @@ public class FakeTimeProvider : TimeProvider
         WakeWaiters();
     }
 
+    /// <summary>
+    /// Advances the date and time in the UTC time zone.
+    /// </summary>
+    /// <param name="value">The date and time in the UTC time zone.</param>
+    /// <remarks>
+    /// This method updates the current time, and has no impact on outstanding
+    /// timers. This is similar to what happens in a real system when the system's
+    /// time is changed.
+    /// </remarks>
+    [Experimental(diagnosticId: DiagnosticIds.Experiments.TimeProvider, UrlFormat = DiagnosticIds.UrlFormat)]
+    public void AdjustTime(DateTimeOffset value)
+    {
+        lock (Waiters)
+        {
+            var delta = value - _now;
+            _now = value;
+
+            // adjust the wake times so they're relative to the new time value
+            foreach (var w in Waiters)
+            {
+                w.WakeupTime += delta.Ticks;
+            }
+        }
+    }
+
     /// <inheritdoc />
     public override long GetTimestamp()
     {
@@ -139,8 +172,11 @@ public class FakeTimeProvider : TimeProvider
         // The same issue could occur converting back, in GetElapsedTime(). Unfortunately
         // that isn't virtual so we can't do the same trick. However, if tests advance
         // the clock in multiples of 1ms or so this loss of precision will not be visible.
+#pragma warning disable S3236 // Caller information arguments should not be provided explicitly
         Debug.Assert(TimestampFrequency == TimeSpan.TicksPerSecond, "Assuming frequency equals ticks per second");
-        return _now.Ticks;
+#pragma warning restore S3236 // Caller information arguments should not be provided explicitly
+
+        return GetUtcNow().Ticks;
     }
 
     /// <inheritdoc />
@@ -194,6 +230,8 @@ public class FakeTimeProvider : TimeProvider
         WakeWaiters();
     }
 
+    internal event EventHandler? GateOpening;
+
     private void WakeWaiters()
     {
         if (Interlocked.CompareExchange(ref _wakeWaitersGate, 1, 0) == 1)
@@ -234,13 +272,14 @@ public class FakeTimeProvider : TimeProvider
                         candidate = waiter;
                     }
                 }
-            }
 
-            if (candidate == null)
-            {
-                // didn't find a candidate to wake, we're done
-                _wakeWaitersGate = 0;
-                return;
+                if (candidate == null)
+                {
+                    // didn't find a candidate to wake, we're done
+                    GateOpening?.Invoke(this, EventArgs.Empty);
+                    _wakeWaitersGate = 0;
+                    return;
+                }
             }
 
             var oldTicks = _now.Ticks;

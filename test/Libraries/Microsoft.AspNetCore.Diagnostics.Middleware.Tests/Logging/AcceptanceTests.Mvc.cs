@@ -30,6 +30,7 @@ public partial class AcceptanceTests
     internal const string ActionRouteTemplate = "api/users/{userId}/{noDataClassification}";
     internal const int ControllerProcessingTimeMs = 1_000;
 
+    [SuppressMessage("Design", "CA1052:Static holder types should be Static or NotInheritable", Justification = "Needed for reflection")]
     private class TestStartupWithControllers
     {
         [SuppressMessage("Major Code Smell", "S1144:Unused private types or members should be removed", Justification = "Used through reflection")]
@@ -61,7 +62,7 @@ public partial class AcceptanceTests
             async (logCollector, client) =>
             {
                 const string UserId = "testUserId";
-                using var response = await client.GetAsync($"/api/users/{UserId}/someTestData?{QueryParamName}=foo");
+                using var response = await client.GetAsync($"/api/users/{UserId}/someTestData?{QueryParamName}=foo").ConfigureAwait(false);
                 Assert.True(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, TimeSpan.FromSeconds(30));
@@ -96,7 +97,7 @@ public partial class AcceptanceTests
             async (logCollector, client) =>
             {
                 const string UserId = "testUserId";
-                using var response = await client.GetAsync($"/api/users/{UserId}/someTestData?{QueryParamName}=foo");
+                using var response = await client.GetAsync($"/api/users/{UserId}/someTestData?{QueryParamName}=foo").ConfigureAwait(false);
                 Assert.True(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, TimeSpan.FromSeconds(30));
@@ -142,7 +143,7 @@ public partial class AcceptanceTests
             {
                 const string UserId = "testUserId";
                 const string NoDataClassParamValue = "someTestData";
-                using var response = await client.GetAsync($"/api/users/{UserId}/{NoDataClassParamValue}?{QueryParamName}=foo");
+                using var response = await client.GetAsync($"/api/users/{UserId}/{NoDataClassParamValue}?{QueryParamName}=foo").ConfigureAwait(false);
                 Assert.True(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, TimeSpan.FromSeconds(30));
@@ -186,7 +187,7 @@ public partial class AcceptanceTests
             async (logCollector, client) =>
             {
                 const string UserId = "testUserId";
-                using var response = await client.GetAsync($"/api/users/{UserId}/someTestData?{QueryParamName}=foo");
+                using var response = await client.GetAsync($"/api/users/{UserId}/someTestData?{QueryParamName}=foo").ConfigureAwait(false);
                 Assert.True(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, TimeSpan.FromSeconds(30));
@@ -227,7 +228,7 @@ public partial class AcceptanceTests
             }),
             async (logCollector, client) =>
             {
-                using var response = await client.GetAsync(RequestPath);
+                using var response = await client.GetAsync(RequestPath).ConfigureAwait(false);
                 Assert.False(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, TimeSpan.FromSeconds(30));

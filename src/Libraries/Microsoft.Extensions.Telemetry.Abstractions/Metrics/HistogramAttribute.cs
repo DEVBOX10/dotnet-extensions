@@ -20,7 +20,7 @@ namespace Microsoft.Extensions.Diagnostics.Metrics;
 /// </list>
 /// </remarks>
 /// <example>
-/// <code>
+/// <code language="csharp">
 /// static partial class Metric
 /// {
 ///     [Histogram("RequestName", "RequestStatusCode")]
@@ -35,7 +35,7 @@ public sealed class HistogramAttribute : Attribute
     /// <summary>
     /// Initializes a new instance of the <see cref="HistogramAttribute"/> class.
     /// </summary>
-    /// <param name="tagNames">A variable array of tag names.</param>
+    /// <param name="tagNames">variable array of tag names.</param>
     public HistogramAttribute(params string[] tagNames)
     {
         TagNames = tagNames;
@@ -54,7 +54,9 @@ public sealed class HistogramAttribute : Attribute
     /// Gets or sets the name of the metric.
     /// </summary>
     /// <example>
-    /// <code>
+    /// In this example, the metric name is <c>SampleMetric</c>. When <c>Name</c> is not provided, the return type of the method is used as the metric name. In this example,
+    /// the metric name would be <c>RequestLatency</c> if <c>Name</c> wasn't provided.
+    /// <code language="csharp">
     /// static partial class Metric
     /// {
     ///     [Histogram("RequestName", "RequestStatusCode", Name="SampleMetric")]
@@ -62,11 +64,6 @@ public sealed class HistogramAttribute : Attribute
     /// }
     /// </code>
     /// </example>
-    /// <remarks>
-    /// In this example, the metric name is <c>SampleMetric</c>. When <c>Name</c> is not provided,
-    /// the return type of the method is used as metric name. In this example, this would
-    /// be <c>RequestLatency</c> if <c>Name</c> wasn't provided.
-    /// </remarks>
     public string? Name { get; set; }
 
     /// <summary>

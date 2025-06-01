@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -54,8 +55,13 @@ public sealed partial class HttpClientBuilderExtensionsTests
         Assert.Contains(services, s => s.ServiceType == typeof(ResiliencePipelineProvider<HttpKey>));
     }
 
-    [Fact]
-    public async Task AddResilienceHandler_OnPipelineDisposed_EnsureCalled()
+    [Theory]
+#if NET6_0_OR_GREATER
+    [CombinatorialData]
+#else
+    [InlineData(true)]
+#endif
+    public async Task AddResilienceHandler_OnPipelineDisposed_EnsureCalled(bool asynchronous = true)
     {
         var onPipelineDisposedCalled = false;
         var services = new ServiceCollection();
@@ -72,9 +78,7 @@ public sealed partial class HttpClientBuilderExtensionsTests
         using (var serviceProvider = services.BuildServiceProvider())
         {
             var client = serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("client");
-            using var request = new HttpRequestMessage(HttpMethod.Get, "https://dummy");
-
-            await client.GetStringAsync("https://dummy");
+            await SendRequest(client, "https://dummy", asynchronous);
         }
 
         onPipelineDisposedCalled.Should().BeTrue();
@@ -92,11 +96,24 @@ public sealed partial class HttpClientBuilderExtensionsTests
         // add twice intentionally
         builder.AddResilienceHandler("test", ConfigureBuilder);
 
+        // We check that the count of existing services is not unnecessary increased.
+        //
+        // The additional 3 services that are registered are related to:
+        // - Configuration of HTTP client options
+        // - Configuration of resilience pipeline
+        // - Registration of keyed service for resilience pipeline
+        // UPDATE NOTE: Starting from .NET 8.0.2, the count of additional services is 2 instead of 3. This is due to the fact that the registration of the resilience
+        // pipeline is now done in the `AddResilienceHandler` method.
         builder.Services.Should().HaveCount(count + 2);
     }
 
-    [Fact]
-    public async Task AddResilienceHandler_EnsureErrorType()
+    [Theory]
+#if NET6_0_OR_GREATER
+    [CombinatorialData]
+#else
+    [InlineData(true)]
+#endif
+    public async Task AddResilienceHandler_EnsureErrorType(bool asynchronous = true)
     {
         using var metricCollector = new MetricCollector<int>(null, "Polly", "resilience.polly.strategy.events");
         var enricher = new TestMetricsEnricher();
@@ -114,15 +131,19 @@ public sealed partial class HttpClientBuilderExtensionsTests
         clientBuilder.Services.Configure<TelemetryOptions>(o => o.MeteringEnrichers.Add(enricher));
 
         var client = clientBuilder.Services.BuildServiceProvider().GetRequiredService<IHttpClientFactory>().CreateClient("client");
-        using var request = new HttpRequestMessage(HttpMethod.Get, "https://dummy");
 
-        using var response = await client.SendAsync(request);
+        using var response = await SendRequest(client, "https://dummy", asynchronous);
 
         enricher.Tags["error.type"].Should().BeOfType<string>().Subject.Should().Be("500");
     }
 
-    [Fact]
-    public async Task AddResilienceHandler_EnsureResilienceHandlerContext()
+    [Theory]
+#if NET6_0_OR_GREATER
+    [CombinatorialData]
+#else
+    [InlineData(true)]
+#endif
+    public async Task AddResilienceHandler_EnsureResilienceHandlerContext(bool asynchronous = true)
     {
         var verified = false;
         _builder
@@ -137,7 +158,9 @@ public sealed partial class HttpClientBuilderExtensionsTests
 
         _builder.AddHttpMessageHandler(() => new TestHandlerStub(HttpStatusCode.InternalServerError));
 
-        await CreateClient(BuilderName).GetAsync("https://dummy");
+        var client = CreateClient(BuilderName);
+        await SendRequest(client, "https://dummy", asynchronous);
+
         verified.Should().BeTrue();
     }
 
@@ -167,10 +190,14 @@ public sealed partial class HttpClientBuilderExtensionsTests
         CircuitBreaker,
     }
 
+    [Theory]
+#if NET6_0_OR_GREATER
+    [CombinatorialData]
+#else
     [InlineData(true)]
     [InlineData(false)]
-    [Theory]
-    public async Task AddResilienceHandler_EnsureProperPipelineInstanceRetrieved(bool bySelector)
+#endif
+    public async Task AddResilienceHandler_EnsureProperPipelineInstanceRetrieved(bool bySelector, bool asynchronous = true)
     {
         // arrange
         var resilienceProvider = new Mock<ResiliencePipelineProvider<HttpKey>>(MockBehavior.Strict);
@@ -203,14 +230,19 @@ public sealed partial class HttpClientBuilderExtensionsTests
         var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("client");
 
         // act
-        await client.GetAsync("https://dummy1");
+        await SendRequest(client, "https://dummy1", asynchronous);
 
         // assert
         resilienceProvider.VerifyAll();
     }
 
-    [Fact]
-    public async Task AddResilienceHandlerBySelector_EnsureResiliencePipelineProviderCalled()
+    [Theory]
+#if NET6_0_OR_GREATER
+    [CombinatorialData]
+#else
+    [InlineData(true)]
+#endif
+    public async Task AddResilienceHandlerBySelector_EnsureResiliencePipelineProviderCalled(bool asynchronous = true)
     {
         // arrange
         var services = new ServiceCollection().AddLogging().AddMetrics();
@@ -234,7 +266,7 @@ public sealed partial class HttpClientBuilderExtensionsTests
         var pipelineProvider = provider.GetRequiredService<ResiliencePipelineProvider<HttpKey>>();
 
         // act
-        await client.GetAsync("https://dummy1");
+        await SendRequest(client, "https://dummy1", asynchronous);
 
         // assert
         providerMock.VerifyAll();
@@ -253,6 +285,77 @@ public sealed partial class HttpClientBuilderExtensionsTests
         var factory = serviceProvider.GetRequiredService<IHttpClientFactory>();
 
         Assert.NotNull(factory.CreateClient("my-client"));
+    }
+
+    [Fact]
+    public void RemoveAllResilienceHandlers_ArgumentValidation()
+    {
+        var services = new ServiceCollection();
+        IHttpClientBuilder? builder = null;
+        Assert.Throws<ArgumentNullException>(() => builder!.RemoveAllResilienceHandlers());
+    }
+
+    [Fact]
+    public void RemoveAllResilienceHandlers_EnsureHandlersRemoved()
+    {
+        var services = new ServiceCollection();
+
+        IHttpClientBuilder? builder = services.AddHttpClient("custom");
+
+        builder.AddStandardResilienceHandler();
+
+        builder.ConfigureAdditionalHttpMessageHandlers((handlers, _) =>
+        {
+            Assert.Single(handlers);
+        });
+
+        builder.RemoveAllResilienceHandlers();
+
+        builder.ConfigureAdditionalHttpMessageHandlers((handlers, _) =>
+        {
+            Assert.Empty(handlers);
+        });
+
+        using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("custom");
+    }
+
+    [Fact]
+    public void RemoveAllResilienceHandlers_AddHandlersAfterRemoval()
+    {
+        var services = new ServiceCollection();
+
+        IHttpClientBuilder? builder = services.AddHttpClient("custom");
+        builder.RemoveAllResilienceHandlers().AddStandardResilienceHandler();
+        builder.ConfigureAdditionalHttpMessageHandlers((handlers, _) =>
+        {
+            Assert.Single(handlers);
+        });
+
+        using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("custom");
+    }
+
+    [Fact]
+    public void RemoveAllResilienceHandlers_EnsureOnlyResilienceHandlersRemoved()
+    {
+        var services = new ServiceCollection();
+
+        IHttpClientBuilder? builder = services.AddHttpClient("custom");
+
+        builder.AddHttpMessageHandler(() => new TestHandlerStub(HttpStatusCode.OK));
+        builder.AddStandardResilienceHandler();
+
+        builder.RemoveAllResilienceHandlers();
+
+        builder.ConfigureAdditionalHttpMessageHandlers((handlers, _) =>
+        {
+            Assert.Single(handlers);
+            Assert.Equal(typeof(TestHandlerStub), handlers.First().GetType());
+        });
+
+        using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("custom");
     }
 
     private void ConfigureBuilder(ResiliencePipelineBuilder<HttpResponseMessage> builder) => builder.AddTimeout(TimeSpan.FromSeconds(1));

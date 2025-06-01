@@ -11,8 +11,16 @@
     <Compile Include="$(MSBuildThisFileDirectory)\..\..\src\Shared\EmptyCollections\*.cs" LinkBase="Shared\EmptyCollections" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(InjectSharedInstruments)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)\..\..\src\Shared\Instruments\*.cs" LinkBase="Shared\Instruments" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(InjectSharedRentedSpan)' == 'true'">
     <Compile Include="$(MSBuildThisFileDirectory)\..\..\src\Shared\RentedSpan\*.cs" LinkBase="Shared\RentedSpan" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(InjectSharedServerSentEvents)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)\..\..\src\Shared\ServerSentEvents\*.cs" LinkBase="Shared\ServerSentEvents" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(InjectSharedNumericExtensions)' == 'true'">
@@ -32,10 +40,18 @@
 
   <ItemGroup Condition="'$(InjectSharedPools)' == 'true'">
     <Compile Include="$(MSBuildThisFileDirectory)\..\..\src\Shared\Pools\*.cs" LinkBase="Shared\Pools" />
-    <PackageReference Include="Microsoft.Extensions.ObjectPool" />
+    <PackageReference Condition="'$(SkipSharedPoolsReferences)' != 'true'" Include="Microsoft.Extensions.ObjectPool" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(InjectSharedBufferWriterPool)' == 'true'">
     <Compile Include="$(MSBuildThisFileDirectory)\..\..\src\Shared\BufferWriterPool\*.cs" LinkBase="Shared\Pools" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(InjectStringSplitExtensions)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)\..\..\src\Shared\StringSplit\*.cs" LinkBase="Shared\StringSplit" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(InjectSharedLogBuffering)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)\..\..\src\Shared\LogBuffering\*.cs" LinkBase="Shared\LogBuffering" />
   </ItemGroup>
 </Project>

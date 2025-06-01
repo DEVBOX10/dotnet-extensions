@@ -2,17 +2,18 @@
   <PropertyGroup>
     <RootNamespace>Microsoft.Gen.ComplianceReports</RootNamespace>
     <Description>Produces compliance reports based on data classification annotations in the code.</Description>
-    <Workstream>Fundamentals</Workstream>
+    <Workstream>Compliance</Workstream>
   </PropertyGroup>
 
   <PropertyGroup>
     <AnalyzerLanguage>cs</AnalyzerLanguage>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <InjectIsExternalInitOnLegacy>true</InjectIsExternalInitOnLegacy>
   </PropertyGroup>
 
   <PropertyGroup>
     <Stage>normal</Stage>
-    <MinCodeCoverage>96</MinCodeCoverage>
+    <MinCodeCoverage>98</MinCodeCoverage>
     <MinMutationScore>85</MinMutationScore>
   </PropertyGroup>
 

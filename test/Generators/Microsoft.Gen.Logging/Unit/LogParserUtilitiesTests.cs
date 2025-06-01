@@ -64,6 +64,8 @@ public class LogParserUtilitiesTests
             null!,
             null!,
             null!,
+            null!,
+            null!,
             null!);
 
         var diagMock = new Mock<Action<Diagnostic>>();
@@ -110,7 +112,9 @@ public class LogParserUtilitiesTests
             null!,
             null!,
             null!,
-            Mock.Of<INamedTypeSymbol>());
+            null!,
+            Mock.Of<INamedTypeSymbol>(),
+            null!);
 
         var diagMock = new Mock<Action<Diagnostic>>();
         var parser = new Parser(null!, diagMock.Object, CancellationToken.None);
@@ -134,7 +138,9 @@ public class LogParserUtilitiesTests
             null!,
             null!,
             null!,
+            null!,
             new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default),
+            null!,
             null!,
             null!,
             null!,

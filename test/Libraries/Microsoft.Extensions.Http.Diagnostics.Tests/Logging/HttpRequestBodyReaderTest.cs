@@ -111,7 +111,7 @@ public class HttpRequestBodyReaderTest
         var token = new CancellationToken(true);
 
         var act = async () =>
-            await httpRequestBodyReader.ReadAsync(httpRequest, token);
+            await httpRequestBodyReader.ReadAsync(httpRequest, token).ConfigureAwait(false);
 
         await act.Should().ThrowAsync<TaskCanceledException>()
             .Where(e => e.CancellationToken.IsCancellationRequested);
@@ -193,7 +193,7 @@ public class HttpRequestBodyReaderTest
         var requestBody = await httpRequestBodyReader.ReadAsync(httpRequest, CancellationToken.None);
 
         var returnedValue = requestBody;
-        var expectedValue = Constants.ReadCancelled;
+        var expectedValue = Constants.ReadCancelledByTimeout;
 
         returnedValue.Should().BeEquivalentTo(expectedValue);
     }

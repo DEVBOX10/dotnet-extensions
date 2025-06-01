@@ -2,7 +2,7 @@
   <PropertyGroup>
     <RootNamespace>Microsoft.Extensions.Hosting</RootNamespace>
     <Description>Tools for integration testing of apps built with Microsoft.Extensions.Hosting</Description>
-    <Workstream>Fundamentals</Workstream>
+    <Workstream>Hosting</Workstream>
     <PackageTags>$(PackageTags);Testing</PackageTags>
   </PropertyGroup>
 
@@ -13,12 +13,13 @@
   </PropertyGroup>
 
   <PropertyGroup>
+    <Stage>dev</Stage>
+    <StageDevDiagnosticId>EXTEXP0016</StageDevDiagnosticId>
     <MinCodeCoverage>100</MinCodeCoverage>
     <MinMutationScore>90</MinMutationScore>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Microsoft.Extensions.Telemetry.Abstractions\Microsoft.Extensions.Telemetry.Abstractions.csproj" />
     <ProjectReference Include="..\Microsoft.Extensions.Diagnostics.Testing\Microsoft.Extensions.Diagnostics.Testing.csproj" />
     <ProjectReference Include="..\Microsoft.Extensions.Compliance.Testing\Microsoft.Extensions.Compliance.Testing.csproj" />
   </ItemGroup>

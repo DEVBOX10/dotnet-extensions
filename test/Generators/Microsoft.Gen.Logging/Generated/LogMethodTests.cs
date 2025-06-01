@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Linq;
 using System.Threading;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Testing;
@@ -231,7 +232,7 @@ public class LogMethodTests
         Assert.Null(collector.LatestRecord.Exception);
         Assert.Equal("M1 One", collector.LatestRecord.Message);
         Assert.Equal(LogLevel.Error, collector.LatestRecord.Level);
-        Assert.Equal(0, collector.LatestRecord.Id.Id);
+        Assert.NotEqual(0, collector.LatestRecord.Id.Id);
         Assert.Equal(1, collector.Count);
 
         collector.Clear();
@@ -239,7 +240,7 @@ public class LogMethodTests
         Assert.Null(collector.LatestRecord.Exception);
         Assert.Equal(string.Empty, collector.LatestRecord.Message);
         Assert.Equal(LogLevel.Debug, collector.LatestRecord.Level);
-        Assert.Equal(0, collector.LatestRecord.Id.Id);
+        Assert.NotEqual(0, collector.LatestRecord.Id.Id);
         Assert.Equal(1, collector.Count);
 
         collector.Clear();
@@ -247,7 +248,7 @@ public class LogMethodTests
         Assert.Null(collector.LatestRecord.Exception);
         Assert.Equal(string.Empty, collector.LatestRecord.Message);
         Assert.Equal(LogLevel.Error, collector.LatestRecord.Level);
-        Assert.Equal(0, collector.LatestRecord.Id.Id);
+        Assert.NotEqual(0, collector.LatestRecord.Id.Id);
         Assert.Equal(1, collector.Count);
 
         collector.Clear();
@@ -255,7 +256,7 @@ public class LogMethodTests
         Assert.Null(collector.LatestRecord.Exception);
         Assert.Equal("M4 Four", collector.LatestRecord.Message);
         Assert.Equal(LogLevel.Debug, collector.LatestRecord.Level);
-        Assert.Equal(0, collector.LatestRecord.Id.Id);
+        Assert.NotEqual(0, collector.LatestRecord.Id.Id);
         Assert.Equal(1, collector.Count);
 
         collector.Clear();
@@ -263,7 +264,7 @@ public class LogMethodTests
         Assert.Null(collector.LatestRecord.Exception);
         Assert.Equal("M5 Five", collector.LatestRecord.Message);
         Assert.Equal(LogLevel.Error, collector.LatestRecord.Level);
-        Assert.Equal(0, collector.LatestRecord.Id.Id);
+        Assert.NotEqual(0, collector.LatestRecord.Id.Id);
         Assert.Equal(1, collector.Count);
 
         collector.Clear();
@@ -271,7 +272,7 @@ public class LogMethodTests
         Assert.Null(collector.LatestRecord.Exception);
         Assert.Equal(string.Empty, collector.LatestRecord.Message);
         Assert.Equal(LogLevel.Debug, collector.LatestRecord.Level);
-        Assert.Equal(0, collector.LatestRecord.Id.Id);
+        Assert.NotEqual(0, collector.LatestRecord.Id.Id);
         Assert.Equal(1, collector.Count);
 
         collector.Clear();
@@ -282,7 +283,7 @@ public class LogMethodTests
         Assert.Null(logRecord.Exception);
         Assert.Equal(string.Empty, logRecord.Message);
         Assert.Equal(LogLevel.Information, logRecord.Level);
-        Assert.Equal(0, logRecord.Id.Id);
+        Assert.NotEqual(0, logRecord.Id.Id);
         Assert.Equal("M7", logRecord.Id.Name);
 
         collector.Clear();
@@ -336,7 +337,7 @@ public class LogMethodTests
         Assert.Null(collector.LatestRecord.Exception);
         Assert.Equal("\"p\" -> \"q\"", collector.LatestRecord.Message);
         Assert.Equal(LogLevel.Warning, collector.LatestRecord.Level);
-        Assert.Equal(0, collector.LatestRecord.Id.Id);
+        Assert.NotEqual(0, collector.LatestRecord.Id.Id);
         Assert.Equal(1, collector.Count);
 
         collector.Clear();
@@ -344,7 +345,7 @@ public class LogMethodTests
         Assert.Null(collector.LatestRecord.Exception);
         Assert.Equal("\"\n\r\\", collector.LatestRecord.Message);
         Assert.Equal(LogLevel.Debug, collector.LatestRecord.Level);
-        Assert.Equal(0, collector.LatestRecord.Id.Id);
+        Assert.NotEqual(0, collector.LatestRecord.Id.Id);
         Assert.Equal(1, collector.Count);
     }
 
@@ -575,7 +576,7 @@ public class LogMethodTests
         Assert.Null(logRecord.Exception);
         Assert.Equal(string.Empty, logRecord.Message);
         Assert.Equal(LogLevel.Warning, logRecord.Level);
-        Assert.Equal(0, logRecord.Id.Id);
+        Assert.NotEqual(0, logRecord.Id.Id);
         Assert.Equal("M1_Event", logRecord.Id.Name);
     }
 
@@ -750,12 +751,35 @@ public class LogMethodTests
         };
 
         collector.Clear();
+        AtSymbolsTestExtensions.UseAtSymbol3(logger, LogLevel.Debug, "42", 42);
+        Assert.Equal("42", collector.LatestRecord.StructuredState!.GetValue("@myevent2"));
+        Assert.Equal("42", collector.LatestRecord.StructuredState!.GetValue("otherevent"));
+        Assert.Equal("UseAtSymbol3, 42 42", collector.LatestRecord.Message);
+
+        collector.Clear();
+        AtSymbolsTestExtensions.UseAtSymbol4(logger, LogLevel.Debug, "42", 42, new ArgumentException("Foo"));
+        Assert.Equal("42", collector.LatestRecord.StructuredState!.GetValue("@myevent3"));
+        Assert.Equal("42", collector.LatestRecord.StructuredState!.GetValue("otherevent"));
+        Assert.Equal("UseAtSymbol4 with error, 42 42", collector.LatestRecord.Message);
+        Assert.NotNull(collector.LatestRecord.Exception);
+
+        collector.Clear();
         AtSymbolsTestExtensions.M3(logger, LogLevel.Debug, o);
         Assert.Equal("42", collector.LatestRecord.StructuredState!.GetValue("event.class"));
 
         collector.Clear();
         AtSymbolsTestExtensions.M5(logger, LogLevel.Debug, o);
         Assert.Equal("42", collector.LatestRecord.StructuredState!.GetValue("class"));
+
+        collector.Clear();
+        AtSymbolsTestExtensions.M6(logger, "42");
+        Assert.Equal("42", collector.LatestRecord.StructuredState!.GetValue("class"));
+        Assert.Equal("M6 class 42", collector.LatestRecord.Message);
+
+        collector.Clear();
+        AtSymbolsTestExtensions.M7(logger, "42");
+        Assert.Equal("42", collector.LatestRecord.StructuredState!.GetValue("@param"));
+        Assert.Equal("M7 param 42", collector.LatestRecord.Message);
     }
 
     [Fact]
@@ -900,6 +924,34 @@ public class LogMethodTests
         Assert.Equal("Converted!", collector.LatestRecord.StructuredState!.GetValue("p1"));
     }
 
+    [Fact]
+    public void OriginalFormatTest()
+    {
+        using var logger = Utils.GetLogger();
+        var collector = logger.FakeLogCollector;
+
+        OriginalFormatTestExtensions.M0(logger);
+        Assert.Equal(1, collector.Count);
+        EnsureOriginalFormatIsLastProperty(collector.LatestRecord, "M0", "M0");
+
+        collector.Clear();
+        OriginalFormatTestExtensions.M1(logger, "0");
+        Assert.Equal(1, collector.Count);
+        EnsureOriginalFormatIsLastProperty(collector.LatestRecord, "M1 {p0}", "M1 0");
+
+        collector.Clear();
+        OriginalFormatTestExtensions.M2(logger, "0", "1");
+        Assert.Equal(1, collector.Count);
+        EnsureOriginalFormatIsLastProperty(collector.LatestRecord, "M2 {p0}{p1}", "M2 01");
+
+        collector.Clear();
+        OriginalFormatTestExtensions.M3(logger, "0", "1", "2");
+        Assert.Equal(1, collector.Count);
+        Assert.Empty(collector.LatestRecord.Message);
+        Assert.Equal(3, collector.LatestRecord.StructuredState!.Count);
+        AssertLastState(collector, new("p0", "0"), new("p1", "1"), new("p2", "2"));
+    }
+
     private static void AssertLastState(FakeLogCollector collector, params KeyValuePair<string, string?>[] expected)
     {
         var rol = (IReadOnlyList<KeyValuePair<string, string>>)collector.LatestRecord.State!;
@@ -925,5 +977,16 @@ public class LogMethodTests
                 Assert.Equal(kvp.Value, rol!.GetValue(kvp.Key));
             }
         }
+    }
+
+    private static void EnsureOriginalFormatIsLastProperty(FakeLogRecord record, string format, string message)
+    {
+        var state = (IReadOnlyList<KeyValuePair<string, string>>)record.State!;
+        Assert.NotNull(state);
+
+        var pair = state.Last();
+        Assert.Equal("{OriginalFormat}", pair.Key);
+        Assert.Equal(format, pair.Value);
+        Assert.Equal(message, record.Message);
     }
 }

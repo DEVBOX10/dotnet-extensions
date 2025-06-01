@@ -3,14 +3,19 @@
 
 using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.Versioning;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.ResourceMonitoring;
 #if !NETFRAMEWORK
 using Microsoft.Extensions.Diagnostics.ResourceMonitoring.Linux;
+using Microsoft.Extensions.Diagnostics.ResourceMonitoring.Linux.Network;
+
 #endif
 using Microsoft.Extensions.Diagnostics.ResourceMonitoring.Windows;
+using Microsoft.Extensions.Diagnostics.ResourceMonitoring.Windows.Disk;
 using Microsoft.Extensions.Diagnostics.ResourceMonitoring.Windows.Interop;
 using Microsoft.Extensions.Diagnostics.ResourceMonitoring.Windows.Network;
+using Microsoft.Shared.DiagnosticIds;
 using Microsoft.Shared.Diagnostics;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -41,6 +46,9 @@ public static class ResourceMonitoringServiceCollectionExtensions
     /// <param name="configure">Delegate to configure <see cref="IResourceMonitorBuilder"/>.</param>
     /// <returns>The value of <paramref name="services" />.</returns>
     /// <exception cref="ArgumentNullException">Either <paramref name="services"/> or <paramref name="configure"/> is <see langword="null"/>.</exception>
+    [Obsolete(DiagnosticIds.Obsoletions.NonObservableResourceMonitoringApiMessage,
+        DiagnosticId = DiagnosticIds.Obsoletions.NonObservableResourceMonitoringApiDiagId,
+        UrlFormat = DiagnosticIds.UrlFormat)]
     public static IServiceCollection AddResourceMonitoring(
         this IServiceCollection services,
         Action<IResourceMonitorBuilder> configure)
@@ -51,6 +59,8 @@ public static class ResourceMonitoringServiceCollectionExtensions
         return services.AddResourceMonitoringInternal(configure);
     }
 
+    // can't easily test the exception throwing case
+    [ExcludeFromCodeCoverage]
     private static IServiceCollection AddResourceMonitoringInternal(
         this IServiceCollection services,
         Action<IResourceMonitorBuilder> configure)
@@ -62,13 +72,17 @@ public static class ResourceMonitoringServiceCollectionExtensions
 #if NETFRAMEWORK
         _ = builder.AddWindowsProvider();
 #else
-        if (GetPlatform() == PlatformID.Win32NT)
+        if (OperatingSystem.IsWindows())
         {
             _ = builder.AddWindowsProvider();
         }
-        else
+        else if (OperatingSystem.IsLinux())
         {
             _ = builder.AddLinuxProvider();
+        }
+        else
+        {
+            throw new PlatformNotSupportedException();
         }
 #endif
 
@@ -77,29 +91,20 @@ public static class ResourceMonitoringServiceCollectionExtensions
         return services;
     }
 
-#if !NETFRAMEWORK
-    [ExcludeFromCodeCoverage]
-    private static PlatformID GetPlatform()
-    {
-        var os = Environment.OSVersion;
-        if (os.Platform != PlatformID.Win32NT && os.Platform != PlatformID.Unix)
-        {
-            throw new NotSupportedException("Resource monitoring is not supported on this operating system.");
-        }
-
-        return os.Platform;
-    }
-#endif
-
+    [SupportedOSPlatform("windows")]
     private static ResourceMonitorBuilder AddWindowsProvider(this ResourceMonitorBuilder builder)
     {
         builder.PickWindowsSnapshotProvider();
 
         _ = builder.Services
-            .AddActivatedSingleton<WindowsCounters>();
+            .AddActivatedSingleton<WindowsNetworkMetrics>()
+            .AddActivatedSingleton<ITcpStateInfoProvider, WindowsTcpStateInfo>();
+
+        builder.Services.TryAddSingleton(TimeProvider.System);
 
         _ = builder.Services
-            .AddActivatedSingleton<TcpTableInfo>();
+            .AddActivatedSingleton<WindowsDiskMetrics>()
+            .AddActivatedSingleton<IPerformanceCounterFactory, PerformanceCounterFactory>();
 
         return builder;
     }
@@ -118,7 +123,7 @@ public static class ResourceMonitoringServiceCollectionExtensions
     }
 
 #if !NETFRAMEWORK
-    private static IResourceMonitorBuilder AddLinuxProvider(this IResourceMonitorBuilder builder)
+    private static ResourceMonitorBuilder AddLinuxProvider(this ResourceMonitorBuilder builder)
     {
         _ = Throw.IfNull(builder);
 
@@ -126,9 +131,28 @@ public static class ResourceMonitoringServiceCollectionExtensions
 
         builder.Services.TryAddSingleton<IFileSystem, OSFileSystem>();
         builder.Services.TryAddSingleton<IUserHz, UserHz>();
-        builder.Services.TryAddSingleton<LinuxUtilizationParser>();
+        builder.PickLinuxParser();
+
+        _ = builder.Services
+            .AddActivatedSingleton<LinuxNetworkUtilizationParser>()
+            .AddActivatedSingleton<LinuxNetworkMetrics>()
+            .AddActivatedSingleton<ITcpStateInfoProvider, LinuxTcpStateInfo>();
 
         return builder;
+    }
+
+    [ExcludeFromCodeCoverage]
+    private static void PickLinuxParser(this ResourceMonitorBuilder builder)
+    {
+        var injectParserV2 = ResourceMonitoringLinuxCgroupVersion.GetCgroupType();
+        if (injectParserV2)
+        {
+            builder.Services.TryAddSingleton<ILinuxUtilizationParser, LinuxUtilizationParserCgroupV2>();
+        }
+        else
+        {
+            builder.Services.TryAddSingleton<ILinuxUtilizationParser, LinuxUtilizationParserCgroupV1>();
+        }
     }
 #endif
 }

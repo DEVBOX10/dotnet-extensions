@@ -28,6 +28,12 @@ using Microsoft.Extensions.Time.Testing;
 using Microsoft.Net.Http.Headers;
 using Microsoft.Shared.Text;
 using Xunit;
+#if NET9_0_OR_GREATER
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using Microsoft.Extensions.Diagnostics.Buffering;
+#endif
 
 namespace Microsoft.AspNetCore.Diagnostics.Logging.Test;
 
@@ -38,6 +44,7 @@ public partial class AcceptanceTests
     private const int SlashRouteProcessingTimeMs = 2_000;
     private static readonly TimeSpan _defaultLogTimeout = TimeSpan.FromSeconds(5);
 
+    [SuppressMessage("Design", "CA1052:Static holder types should be Static or NotInheritable", Justification = "Needed for reflection")]
     private class TestStartup
     {
         [SuppressMessage("Major Code Smell", "S1144:Unused private types or members should be removed", Justification = "Used through reflection")]
@@ -53,7 +60,45 @@ public partial class AcceptanceTests
         {
             app.UseRouting();
             app.UseHttpLogging();
+#if NET9_0_OR_GREATER
+            app.Map("/logatrequest", static x =>
+                x.Run(static async context =>
+                {
+                    await context.Request.Body.DrainAsync(CancellationToken.None);
 
+                    // normally, this would be a Middleware and HttpRequestLogBuffer would be injected via constructor
+                    ILoggerFactory loggerFactory = context.RequestServices.GetRequiredService<ILoggerFactory>();
+                    ILogger logger = loggerFactory.CreateLogger("logatrequest");
+
+                    logger.LogInformation("Log Information from Request");
+
+                    var hugeState = new List<KeyValuePair<string, object?>>
+                    {
+                        new("test", Enumerable.Repeat("test", 10000).ToArray())
+                    };
+                    logger.LogTrace($"Log Trace from Request, {hugeState}");
+                }));
+
+            app.Map("/flushrequestlogs", static x =>
+                x.Run(static async context =>
+                {
+                    await context.Request.Body.DrainAsync(CancellationToken.None);
+
+                    // normally, this would be a Middleware and HttpRequestLogBuffer would be injected via constructor
+                    var bufferManager = context.RequestServices.GetService<PerRequestLogBuffer>();
+                    bufferManager?.Flush();
+                }));
+
+            app.Map("/flushalllogs", static x =>
+                x.Run(static async context =>
+                {
+                    await context.Request.Body.DrainAsync(CancellationToken.None);
+
+                    // normally, this would be a Middleware and HttpRequestLogBuffer would be injected via constructor
+                    var bufferManager = context.RequestServices.GetService<PerRequestLogBuffer>();
+                    bufferManager?.Flush();
+                }));
+#endif
             app.Map("/error", static x =>
                 x.Run(static async context =>
                 {
@@ -169,7 +214,7 @@ public partial class AcceptanceTests
                 const string Content = "Client: hello!";
 
                 using var content = new StringContent(Content);
-                using var response = await client.PostAsync("/", content);
+                using var response = await client.PostAsync("/", content).ConfigureAwait(false);
                 Assert.True(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout);
@@ -229,7 +274,7 @@ public partial class AcceptanceTests
                 const string Content = "Client: hello!";
 
                 using var content = new StringContent(Content, null, requestContentType);
-                using var response = await client.PostAsync("/", content);
+                using var response = await client.PostAsync("/myroute/123", content).ConfigureAwait(false);
                 Assert.True(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout);
@@ -267,6 +312,48 @@ public partial class AcceptanceTests
     }
 
     [Fact]
+    public async Task HttpLogging_WhenIncludeUnmatchedRoutes_LogRequestPath()
+    {
+        await RunAsync(
+            LogLevel.Information,
+            services => services.AddHttpLogging(x =>
+            {
+                x.MediaTypeOptions.Clear();
+                x.MediaTypeOptions.AddText("text/*");
+                x.LoggingFields |= HttpLoggingFields.RequestBody;
+            }).AddHttpLoggingRedaction(options => options.IncludeUnmatchedRoutes = true),
+            async (logCollector, client) =>
+            {
+                const string Content = "Client: hello!";
+
+                using var content = new StringContent(Content, null, MediaTypeNames.Text.Html);
+                using var response = await client.PostAsync("/myroute/123", content).ConfigureAwait(false);
+                Assert.True(response.IsSuccessStatusCode);
+
+                await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout);
+
+                Assert.Equal(1, logCollector.Count);
+                Assert.Null(logCollector.LatestRecord.Exception);
+                Assert.Equal(LogLevel.Information, logCollector.LatestRecord.Level);
+                Assert.Equal(LoggingCategory, logCollector.LatestRecord.Category);
+
+                var responseStatus = ((int)response.StatusCode).ToInvariantString();
+                var state = logCollector.LatestRecord.StructuredState!;
+
+                Assert.DoesNotContain(state, x => x.Key == HttpLoggingTagNames.ResponseBody);
+                Assert.DoesNotContain(state, x => x.Key.StartsWith(HttpLoggingTagNames.RequestHeaderPrefix));
+                Assert.DoesNotContain(state, x => x.Key.StartsWith(HttpLoggingTagNames.ResponseHeaderPrefix));
+                Assert.Single(state, x => x.Key == HttpLoggingTagNames.Host && !string.IsNullOrEmpty(x.Value));
+                Assert.Single(state, x => x.Key == HttpLoggingTagNames.Path && x.Value == "/myroute/123");
+                Assert.Single(state, x => x.Key == HttpLoggingTagNames.StatusCode && x.Value == responseStatus);
+                Assert.Single(state, x => x.Key == HttpLoggingTagNames.Method && x.Value == HttpMethod.Post.ToString());
+                Assert.Single(state, x => x.Key == HttpLoggingTagNames.Duration &&
+                    x.Value != null &&
+                    int.Parse(x.Value, CultureInfo.InvariantCulture) == SlashRouteProcessingTimeMs);
+            });
+    }
+
+    [Fact]
     public async Task HttpLogging_WhenLogLevelInfo_LogRequestStart()
     {
         await RunAsync(
@@ -294,7 +381,7 @@ public partial class AcceptanceTests
                 };
 
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json));
-                using var response = await client.SendAsync(request);
+                using var response = await client.SendAsync(request).ConfigureAwait(false);
                 Assert.True(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout, expectedRecords: 2);
@@ -355,7 +442,7 @@ public partial class AcceptanceTests
                 using var httpMessage = new HttpRequestMessage(HttpMethod.Get, "/");
                 httpMessage.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(MediaTypeNames.Application.Json));
 
-                using var response = await client.SendAsync(httpMessage);
+                using var response = await client.SendAsync(httpMessage).ConfigureAwait(false);
                 Assert.True(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout);
@@ -403,7 +490,7 @@ public partial class AcceptanceTests
             },
             async static (logCollector, client) =>
             {
-                using var response = await client.DeleteAsync("/");
+                using var response = await client.DeleteAsync("/").ConfigureAwait(false);
                 Assert.True(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout);
@@ -418,7 +505,7 @@ public partial class AcceptanceTests
 
                 Assert.Equal(9, state!.Count);
                 Assert.Single(state, x => x.Key == TestHttpLogEnricher.Key1 && x.Value == TestHttpLogEnricher.Value1);
-                Assert.Single(state, x => x.Key == TestHttpLogEnricher.Key2 && x.Value == TestHttpLogEnricher.Value2.ToString(CultureInfo.CurrentCulture));
+                Assert.Single(state, x => x.Key == TestHttpLogEnricher.Key2 && x.Value == TestHttpLogEnricher.Value2.ToString(CultureInfo.InvariantCulture));
                 Assert.Single(state, x => x.Key == HttpLoggingTagNames.Method && x.Value == HttpMethod.Delete.ToString());
                 Assert.DoesNotContain(state, x => x.Key == HttpLoggingTagNames.RequestBody);
                 Assert.DoesNotContain(state, x => x.Key == HttpLoggingTagNames.ResponseBody);
@@ -445,7 +532,7 @@ public partial class AcceptanceTests
             async static (logCollector, client) =>
             {
                 const string RequestPath = "/api/users/123/add-task/345";
-                using var response = await client.GetAsync(RequestPath);
+                using var response = await client.GetAsync(RequestPath).ConfigureAwait(false);
                 Assert.True(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout);
@@ -475,7 +562,7 @@ public partial class AcceptanceTests
             },
             async static (logCollector, client) =>
             {
-                using var response = await client.DeleteAsync("/");
+                using var response = await client.DeleteAsync("/").ConfigureAwait(false);
                 Assert.True(response.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout, expectedRecords: 2);
@@ -492,11 +579,11 @@ public partial class AcceptanceTests
 
                 Assert.Equal(5, firstState!.Count);
                 Assert.DoesNotContain(firstState, x => x.Key == TestHttpLogEnricher.Key1 && x.Value == TestHttpLogEnricher.Value1);
-                Assert.DoesNotContain(firstState, x => x.Key == TestHttpLogEnricher.Key2 && x.Value == TestHttpLogEnricher.Value2.ToString(CultureInfo.CurrentCulture));
+                Assert.DoesNotContain(firstState, x => x.Key == TestHttpLogEnricher.Key2 && x.Value == TestHttpLogEnricher.Value2.ToString(CultureInfo.InvariantCulture));
 
                 Assert.Equal(3, secondState!.Count);
                 Assert.Single(secondState, x => x.Key == TestHttpLogEnricher.Key1 && x.Value == TestHttpLogEnricher.Value1);
-                Assert.Single(secondState, x => x.Key == TestHttpLogEnricher.Key2 && x.Value == TestHttpLogEnricher.Value2.ToString(CultureInfo.CurrentCulture));
+                Assert.Single(secondState, x => x.Key == TestHttpLogEnricher.Key2 && x.Value == TestHttpLogEnricher.Value2.ToString(CultureInfo.InvariantCulture));
             });
     }
 
@@ -508,12 +595,12 @@ public partial class AcceptanceTests
             static x => x.AddHttpLoggingRedaction().AddHttpLogging(x => x.CombineLogs = false),
             async static (logCollector, client) =>
             {
-                using var firstResponse = await client.DeleteAsync("/");
+                using var firstResponse = await client.DeleteAsync("/").ConfigureAwait(false);
                 Assert.True(firstResponse.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout, expectedRecords: 2);
 
-                using var secondResponse = await client.DeleteAsync("/");
+                using var secondResponse = await client.DeleteAsync("/").ConfigureAwait(false);
                 Assert.True(secondResponse.IsSuccessStatusCode);
 
                 await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout, expectedRecords: 4);
@@ -543,6 +630,8 @@ public partial class AcceptanceTests
                 Assert.DoesNotContain(fourthRecord, x => x.Key == HttpLoggingTagNames.Duration);
                 Assert.DoesNotContain(fithRecord!, x => x.Key == HttpLoggingTagNames.Duration);
 
+                Assert.Single(secondRecord!);
+                Assert.Single(fithRecord!);
                 Assert.Single(secondRecord!, x => x.Key == HttpLoggingTagNames.StatusCode && x.Value == responseStatus);
                 Assert.Single(fithRecord!, x => x.Key == HttpLoggingTagNames.StatusCode && x.Value == responseStatus);
 
@@ -664,7 +753,7 @@ public partial class AcceptanceTests
             async static (logCollector, client) =>
             {
                 using var content = new StringContent("Client: hello!");
-                using var response = await client.PostAsync("/", content);
+                using var response = await client.PostAsync("/", content).ConfigureAwait(false);
 
                 Assert.True(response.IsSuccessStatusCode);
 
@@ -694,7 +783,7 @@ public partial class AcceptanceTests
             }),
             async (logCollector, client) =>
             {
-                using var response = await client.GetAsync(httpPath);
+                using var response = await client.GetAsync(httpPath).ConfigureAwait(false);
 
                 Assert.True(response.IsSuccessStatusCode);
 
@@ -710,7 +799,160 @@ public partial class AcceptanceTests
                 }
             });
     }
+#if NET9_0_OR_GREATER
+    [Fact]
+    public async Task HttpRequestBuffering()
+    {
+        await RunAsync<TestStartup>(
+            LogLevel.Trace,
+            services => services
+            .AddLogging(builder =>
+            {
+                // enable Microsoft.AspNetCore.Routing.Matching.DfaMatcher debug logs
+                // which are produced by ASP.NET Core within HTTP context.
+                // This is what is going to be buffered and tested.
+                builder.AddFilter("Microsoft.AspNetCore.Routing.Matching.DfaMatcher", LogLevel.Debug);
 
+                // Disable logs from HTTP logging middleware, otherwise even though they are not buffered,
+                // they will be logged as usual and contaminate test results:
+                builder.AddFilter("Microsoft.AspNetCore.HttpLogging", LogLevel.None);
+
+                builder.AddPerIncomingRequestBuffer(LogLevel.Debug);
+            }),
+            async (logCollector, client, sp) =>
+            {
+                // just HTTP request logs:
+                using HttpResponseMessage response = await client.GetAsync("/flushrequestlogs").ConfigureAwait(false);
+                Assert.True(response.IsSuccessStatusCode);
+                await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout);
+                Assert.Equal(1, logCollector.Count);
+                Assert.Equal(LogLevel.Debug, logCollector.LatestRecord.Level);
+                Assert.Equal("Microsoft.AspNetCore.Routing.Matching.DfaMatcher", logCollector.LatestRecord.Category);
+
+                // HTTP request logs + global logs:
+                using var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+                ILogger logger = loggerFactory.CreateLogger("test");
+                logger.LogTrace("This is a log message");
+                using HttpResponseMessage response2 = await client.GetAsync("/flushalllogs").ConfigureAwait(false);
+                Assert.True(response2.IsSuccessStatusCode);
+                await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout);
+
+                // 1st and 2nd log records are from DfaMatcher, and 3rd is from our test category
+                Assert.Equal(3, logCollector.Count);
+                Assert.Equal(LogLevel.Trace, logCollector.LatestRecord.Level);
+                Assert.Equal("test", logCollector.LatestRecord.Category);
+            });
+    }
+
+    [Fact]
+    public async Task HttpRequestBuffering_RespectsAutoFlush()
+    {
+        await RunAsync<TestStartup>(
+            LogLevel.Trace,
+            services => services
+            .AddLogging(builder =>
+            {
+                // enable Microsoft.AspNetCore.Routing.Matching.DfaMatcher debug logs
+                // which are produced by ASP.NET Core within HTTP context.
+                // This is what is going to be buffered and tested.
+                builder.AddFilter("Microsoft.AspNetCore.Routing.Matching.DfaMatcher", LogLevel.Debug);
+
+                // Disable logs from HTTP logging middleware, otherwise even though they are not buffered,
+                // they will be logged as usual and contaminate test results:
+                builder.AddFilter("Microsoft.AspNetCore.HttpLogging", LogLevel.None);
+
+                builder.AddPerIncomingRequestBuffer(options =>
+                {
+                    options.AutoFlushDuration = TimeSpan.FromMinutes(30);
+                    options.Rules.Add(new LogBufferingFilterRule(logLevel: LogLevel.Debug));
+                });
+
+                builder.Services.Configure<GlobalLogBufferingOptions>(options =>
+                {
+                    options.AutoFlushDuration = TimeSpan.FromMinutes(30);
+                });
+            }),
+            async (logCollector, client, sp) =>
+            {
+                using var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+                ILogger logger = loggerFactory.CreateLogger("test");
+                logger.LogTrace("This is a log message");
+                using HttpResponseMessage response2 = await client.GetAsync("/flushalllogs").ConfigureAwait(false);
+
+                // log again, but since AutoFlushDuration is long enough, the log won't be buffered,
+                // so we don't need to flush() again and expect it to be emitted anyway.
+                logger.LogTrace("This is a log message 2");
+                await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout);
+
+                // 1st log record is from DfaMatcher,
+                // and 2nd 3rd are from our "test" category
+                Assert.Equal(3, logCollector.Count);
+                Assert.Equal(LogLevel.Trace, logCollector.LatestRecord.Level);
+                Assert.Equal("test", logCollector.LatestRecord.Category);
+            });
+    }
+
+    [Fact]
+    public async Task HttpRequestBuffering_DoesNotBufferDisabledOrOversizedLogs()
+    {
+        await RunAsync<TestStartup>(
+            LogLevel.Trace,
+            services => services
+            .AddLogging(builder =>
+            {
+                // enable Microsoft.AspNetCore.Routing.Matching.DfaMatcher debug logs
+                // which are produced by ASP.NET Core within HTTP context.
+                // This is what is going to be buffered and tested.
+                builder.AddFilter("Microsoft.AspNetCore.Routing.Matching.DfaMatcher", LogLevel.Debug);
+
+                // Disable logs from HTTP logging middleware, otherwise even though they are not buffered,
+                // they will be logged as usual and contaminate test results:
+                builder.AddFilter("Microsoft.AspNetCore.HttpLogging", LogLevel.None);
+
+                builder.AddPerIncomingRequestBuffer(options =>
+                {
+                    options.AutoFlushDuration = TimeSpan.Zero;
+                    options.MaxLogRecordSizeInBytes = 500;
+                    options.Rules.Add(new LogBufferingFilterRule(logLevel: LogLevel.Debug));
+                    options.Rules.Add(new LogBufferingFilterRule(logLevel: LogLevel.Debug, categoryName: "logatrequest"));
+                });
+
+                builder.Services.Configure<GlobalLogBufferingOptions>(options =>
+                {
+                    options.AutoFlushDuration = TimeSpan.Zero;
+                    options.MaxLogRecordSizeInBytes = 500;
+                });
+            }),
+            async (logCollector, client, sp) =>
+            {
+                using var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+                ILogger logger = loggerFactory.CreateLogger("test");
+                logger.LogTrace("This is a log message");
+                using HttpResponseMessage response2 = await client.GetAsync("/flushalllogs").ConfigureAwait(false);
+                using HttpResponseMessage response3 = await client.GetAsync("/logatrequest").ConfigureAwait(false);
+
+                // log again, Information log buffering is not enabled,
+                // so we don't need to flush() again and expect it to be emitted anyway.
+                logger.LogInformation("This is a log message 2");
+
+                // log again, but this log size is too big to be buffered,
+                // so we don't need to flush() again and expect it to be emitted anyway.
+                var hugeState = new List<KeyValuePair<string, object?>>
+                {
+                    new("test", Enumerable.Repeat("test", 10000).ToArray())
+                };
+                logger.LogTrace($"This is a  huge log message 3, {hugeState}");
+                await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout);
+
+                // 1st log record is from DfaMatcher,
+                // 2, 3, 4th are from our "test" category
+                // and 5 and 6th are logs from the /logatrequest endpoint
+                Assert.Equal(6, logCollector.Count);
+                Assert.Equal(LogLevel.Trace, logCollector.LatestRecord.Level);
+                Assert.Equal("test", logCollector.LatestRecord.Category);
+            });
+    }
+#endif
     [Fact]
     public async Task HttpLogging_LogRecordIsNotCreated_If_Disabled()
     {
@@ -724,7 +966,7 @@ public partial class AcceptanceTests
             }),
             async (logCollector, client) =>
             {
-                using var response = await client.GetAsync("");
+                using var response = await client.GetAsync("").ConfigureAwait(false);
 
                 Assert.True(response.IsSuccessStatusCode);
                 Assert.Equal(0, logCollector.Count);
@@ -740,7 +982,7 @@ public partial class AcceptanceTests
             .AddHttpLogEnricher<ThrowingEnricher>(),
             async (logCollector, client) =>
             {
-                using var response = await client.GetAsync("");
+                using var response = await client.GetAsync("").ConfigureAwait(false);
 
                 Assert.True(response.IsSuccessStatusCode);
                 await WaitForLogRecordsAsync(logCollector, _defaultLogTimeout);

@@ -26,7 +26,7 @@ namespace Microsoft.Shared.Pools;
 /// to get the buffer.
 /// </remarks>
 /// <example>
-/// <code>
+/// <code language="csharp">
 /// using var rental = new RentedSpan&lt;char&gt;(length);
 /// var span = rental.Rented ? rental.Span : stackalloc char[length];
 /// </code>
@@ -90,7 +90,7 @@ internal readonly ref struct RentedSpan<T>
     /// When a buffer isn't rented by this type, it's a cue to you to allocate buffer from the stack instead
     /// using stackalloc.
     /// </remarks>
-    public Span<T> Span => _rentedBuffer != null ? _rentedBuffer.AsSpan(0, _length) : Array.Empty<T>().AsSpan();
+    public Span<T> Span => _rentedBuffer != null ? _rentedBuffer.AsSpan(0, _length) : default;
 
     /// <summary>
     /// Gets a value indicating whether a buffer has been rented.

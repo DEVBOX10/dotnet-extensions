@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Microsoft.Extensions.AsyncState.Test;
@@ -54,7 +55,9 @@ public class AsyncStateTests
 
             checkAsyncFlowTcs.SetResult(null!);
 
+#pragma warning disable VSTHRD003 // Avoid awaiting foreign Tasks
             await waitForNullTcs.Task;
+#pragma warning restore VSTHRD003 // Avoid awaiting foreign Tasks
 
             try
             {
@@ -102,7 +105,9 @@ public class AsyncStateTests
 
             checkAsyncFlowTcs.SetResult(null!);
 
+#pragma warning disable VSTHRD003 // Avoid awaiting foreign Tasks
             await waitForNullTcs.Task;
+#pragma warning restore VSTHRD003 // Avoid awaiting foreign Tasks
 
             try
             {
@@ -195,15 +200,16 @@ public class AsyncStateTests
     public void RegisterContextCorrectly()
     {
         var asyncState = new AsyncState();
+        var initialContextCount = asyncState.ContextCount;
 
         var c1 = asyncState.RegisterAsyncContext();
-        Assert.Equal(0, c1.Index);
+        Assert.Equal(0, c1.Index - initialContextCount);
         var c2 = asyncState.RegisterAsyncContext();
-        Assert.Equal(1, c2.Index);
+        Assert.Equal(1, c2.Index - initialContextCount);
         var c3 = asyncState.RegisterAsyncContext();
-        Assert.Equal(2, c3.Index);
+        Assert.Equal(2, c3.Index - initialContextCount);
 
-        Assert.Equal(3, asyncState.ContextCount);
+        Assert.Equal(3, asyncState.ContextCount - initialContextCount);
     }
 
     [Fact]
@@ -228,5 +234,29 @@ public class AsyncStateTests
         var l = new List<object?>(new object?[5]);
         AsyncState.EnsureCount(l, 5);
         Assert.Equal(5, l.Count);
+    }
+
+    [Fact]
+    public void AsyncStateCanBeUsedInDifferentServiceProviders()
+    {
+        var expectedValue1 = new Tuple<double>(3.14);
+        var expectedValue2 = new Tuple<int>(42);
+        var spOne = CreateAsyncState<Tuple<double>>();
+        var spTwo = CreateAsyncState<Tuple<int>>();
+        spOne.Set(expectedValue1);
+        spTwo.Set(expectedValue2);
+        var value1 = spOne.Get();
+        var value2 = spTwo.Get();
+
+        Assert.Equal(expectedValue1, value1);
+        Assert.Equal(expectedValue2, value2);
+
+        static IAsyncContext<T> CreateAsyncState<T>()
+            where T : notnull
+        {
+            var services = new ServiceCollection().AddAsyncState().BuildServiceProvider();
+            services.GetRequiredService<IAsyncState>().Initialize();
+            return services.GetRequiredService<IAsyncContext<T>>();
+        }
     }
 }

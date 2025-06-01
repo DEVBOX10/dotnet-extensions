@@ -3,12 +3,23 @@
 
 using System;
 using Microsoft.Extensions.Compliance.Classification;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Microsoft.Extensions.Compliance.Redaction.Test;
 
 public class RedactorProviderTests
 {
+    [Fact]
+    public void RedactorProvider_Returns_NullRedactor_For_NoneDataClassification()
+    {
+        var redactorProvider = new RedactorProvider(
+            redactors: [ErasingRedactor.Instance],
+            options: Microsoft.Extensions.Options.Options.Create(new RedactorProviderOptions()));
+
+        Assert.IsType<NullRedactor>(redactorProvider.GetRedactor(DataClassification.None));
+    }
+
     [Fact]
     public void RedactorProvider_Returns_Redactor_For_Every_Data_Classification()
     {
@@ -37,11 +48,53 @@ public class RedactorProviderTests
             redactors: new Redactor[] { ErasingRedactor.Instance, NullRedactor.Instance },
             options: Microsoft.Extensions.Options.Options.Create(opt));
 
-        var r1 = redactorProvider.GetRedactor(_dataClassification1);
-        var r2 = redactorProvider.GetRedactor(_dataClassification2);
-        var r3 = redactorProvider.GetRedactor(_dataClassification3);
+        Redactor r1 = redactorProvider.GetRedactor(_dataClassification1);
+        Redactor r2 = redactorProvider.GetRedactor(_dataClassification2);
+        Redactor r3 = redactorProvider.GetRedactor(_dataClassification3);
+        Redactor r4 = redactorProvider.GetRedactor(DataClassification.None);
 
-        Assert.Equal(typeof(ErasingRedactor), r1.GetType());
+        Assert.IsType<ErasingRedactor>(r1);
+        Assert.IsType<NullRedactor>(r2);
+        Assert.IsType<ErasingRedactor>(r3);
+        Assert.IsType<NullRedactor>(r4);
+    }
+
+    [Fact]
+    public void RedactorProvider_Returns_Same_Redactor_For_Logically_Same_Data_Classification()
+    {
+        var dc1 = new DataClassificationSet(new DataClassification("DummyTaxonomy", "Classification"));
+        var dc2 = new DataClassificationSet(new DataClassification("DummyTaxonomy", "Classification2"));
+        var dc3 = new DataClassificationSet(new DataClassification("DummyTaxonomy", "Classification3"));
+        var dc4 = new DataClassificationSet(new DataClassification("DummyTaxonomy", "Classification4"));
+        var dc5 = new DataClassificationSet(new DataClassification("DummyTaxonomy", "Classification5"));
+        var dc6 = new DataClassificationSet(new DataClassification("DummyTaxonomy", "Classification6"));
+        var dc7 = new DataClassificationSet(new DataClassification("DummyTaxonomy", "Classification7"));
+        var dc8 = new DataClassificationSet(new DataClassification("DummyTaxonomy", "Classification8"));
+
+        var dc9 = new DataClassification("DummyTaxonomy", "Classification9");
+
+        var dc1LogicalCopy = new DataClassificationSet(new[] { new DataClassification("DummyTaxonomy", "Classification") });
+
+        var redactorProvider = new ServiceCollection()
+        .AddRedaction(redaction =>
+        {
+            redaction.SetRedactor<NullRedactor>(dc1);
+            redaction.SetRedactor<NullRedactor>(dc2);
+            redaction.SetRedactor<NullRedactor>(dc3);
+            redaction.SetRedactor<NullRedactor>(dc4);
+            redaction.SetRedactor<NullRedactor>(dc5);
+            redaction.SetRedactor<NullRedactor>(dc6);
+            redaction.SetRedactor<NullRedactor>(dc7);
+            redaction.SetRedactor<NullRedactor>(dc8);
+        })
+        .BuildServiceProvider()
+        .GetRequiredService<IRedactorProvider>();
+
+        var r1 = redactorProvider.GetRedactor(dc1);
+        var r2 = redactorProvider.GetRedactor(dc1LogicalCopy);
+        var r3 = redactorProvider.GetRedactor(dc9);
+
+        Assert.Equal(typeof(NullRedactor), r1.GetType());
         Assert.Equal(typeof(NullRedactor), r2.GetType());
         Assert.Equal(typeof(ErasingRedactor), r3.GetType());
     }

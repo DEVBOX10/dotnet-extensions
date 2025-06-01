@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Testing;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
+using VerifyXunit;
 using Xunit;
 using static Microsoft.Extensions.Options.Options;
 
@@ -32,7 +33,7 @@ public sealed class ResourceMonitoringServiceTests
     /// <summary>
     /// Simply construct the object.
     /// </summary>
-    /// <remarks>Tests that look into internals like this are evil.  Consider removing long term.</remarks>
+    /// <remarks>Tests that look into internals like this are evil. Consider removing long term.</remarks>
     [Fact]
     public void BasicConstructor()
     {
@@ -75,7 +76,7 @@ public sealed class ResourceMonitoringServiceTests
     /// <summary>
     /// Simply construct the object (publisher constructor).
     /// </summary>
-    /// <remarks>Tests that look into internals like this are evil.  Consider removing long term.</remarks>
+    /// <remarks>Tests that look into internals like this are evil. Consider removing long term.</remarks>
     [Fact]
     public void BasicConstructor_NullPublishers_Throws()
     {
@@ -245,7 +246,7 @@ public sealed class ResourceMonitoringServiceTests
             }),
             new List<IResourceUtilizationPublisher>
             {
-                new GenericPublisher((_) => e.Set())
+                new GenericPublisher((_) => ResilientSetEvent(e))
             },
             clock);
 
@@ -293,7 +294,7 @@ public sealed class ResourceMonitoringServiceTests
     /// <summary>
     /// Validate that the tracker invokes the publisher's Publish method.
     /// </summary>
-    /// <remarks>Tests that look into internals like this are evil.  Consider removing long term.</remarks>
+    /// <remarks>Tests that look into internals like this are evil. Consider removing long term.</remarks>
     [Fact]
     public async Task ResourceUtilizationTracker_InitializedProperly_InvokesPublishers()
     {
@@ -322,7 +323,7 @@ public sealed class ResourceMonitoringServiceTests
                 new GenericPublisher(_ =>
                 {
                     publisherCalled = true;
-                    autoResetEvent.Set();
+                    ResilientSetEvent(autoResetEvent);
                 })
             },
             clock);
@@ -342,6 +343,35 @@ public sealed class ResourceMonitoringServiceTests
 
         // Asserts that the publisher was called.
         Assert.True(publisherCalled);
+    }
+
+    [Fact]
+    public async Task ResourceUtilizationTracker_LogsSnapshotInformation()
+    {
+        const int TimerPeriod = 100;
+        var logger = new FakeLogger<ResourceMonitorService>();
+        var clock = new FakeTimeProvider();
+
+        using var tracker = new ResourceMonitorService(
+            new FakeProvider(),
+            logger,
+            Create(new ResourceMonitoringOptions
+            {
+                CollectionWindow = TimeSpan.FromMilliseconds(TimerPeriod),
+                PublishingWindow = TimeSpan.FromMilliseconds(TimerPeriod),
+                SamplingInterval = TimeSpan.FromMilliseconds(TimerPeriod)
+            }),
+            Array.Empty<IResourceUtilizationPublisher>(),
+            clock);
+
+        // Start running the tracker.
+        await tracker.StartAsync(CancellationToken.None);
+
+        clock.Advance(TimeSpan.FromMilliseconds(TimerPeriod));
+
+        await tracker.StopAsync(CancellationToken.None);
+
+        await Verifier.Verify(logger.Collector.LatestRecord).UseDirectory("Verified");
     }
 
     [Fact(Skip = "Broken test, see https://github.com/dotnet/extensions/issues/4529")]
@@ -415,10 +445,7 @@ public sealed class ResourceMonitoringServiceTests
             Create(options),
             new List<IResourceUtilizationPublisher>
             {
-                new GenericPublisher(_ =>
-                {
-                    autoResetEvent.Set();
-                }),
+                new GenericPublisher(_ => ResilientSetEvent(autoResetEvent))
             },
             clock);
 
@@ -527,10 +554,7 @@ public sealed class ResourceMonitoringServiceTests
             Create(options),
             new List<IResourceUtilizationPublisher>
             {
-                new GenericPublisher(_ =>
-                {
-                    autoResetEvent.Set();
-                }),
+                new GenericPublisher(_ => ResilientSetEvent(autoResetEvent))
             },
             clock);
 
@@ -642,7 +666,7 @@ public sealed class ResourceMonitoringServiceTests
     }
 
     [Fact]
-    public void GetUtilization_ProvidedByWindowGreaterThanSamplingWindowButLesserThanCollectionWindow_Successes()
+    public void GetUtilization_ProvidedByWindowGreaterThanSamplingWindowButLesserThanCollectionWindow_Succeeds()
     {
         var providerMock = new Mock<ISnapshotProvider>(MockBehavior.Loose);
 
@@ -710,5 +734,33 @@ public sealed class ResourceMonitoringServiceTests
         var typ = typeof(ResourceMonitorService);
         var type = typ.GetField(name, BindingFlags.NonPublic | BindingFlags.Instance);
         return (T?)type?.GetValue(tracker);
+    }
+
+    private static void ResilientSetEvent(AutoResetEvent e)
+    {
+        try
+        {
+            e.Set();
+        }
+#pragma warning disable CA1031
+        catch
+#pragma warning restore CA1031
+        {
+            // can happen since test termination is racy and the event might have already been disposed
+        }
+    }
+
+    private static void ResilientSetEvent(ManualResetEventSlim e)
+    {
+        try
+        {
+            e.Set();
+        }
+#pragma warning disable CA1031
+        catch
+#pragma warning restore CA1031
+        {
+            // can happen since test termination is racy and the event might have already been disposed
+        }
     }
 }

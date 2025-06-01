@@ -1,8 +1,14 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System;
+using System.IO;
+using System.Reflection;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using Microsoft.Gen.Logging.Parsing;
+using Microsoft.Gen.Shared;
+using VerifyXunit;
 using Xunit;
 
 namespace Microsoft.Gen.Logging.Test;
@@ -53,11 +59,11 @@ public partial class ParserTests
 
             partial class C
             {
-                [LoggerMessage(0, LogLevel.Debug, ""Parameterless..."")]
-                static partial void M0(ILogger logger, [LogProperties(OmitReferenceName = true)] MyType /*0+*/p0/*-0*/);
+                [LoggerMessage(LogLevel.Debug)]
+                static partial void M0(ILogger logger, int p0, [LogProperties(OmitReferenceName = true)] MyType /*0+*/p1/*-0*/);
             }";
 
-        await RunGenerator(Source, DiagDescriptors.LogPropertiesNameCollision);
+        await RunGenerator(Source, DiagDescriptors.TagNameCollision);
     }
 
     [Fact]
@@ -207,7 +213,7 @@ public partial class ParserTests
                 static partial void M(ILogger logger, string param, string /*0+*/Param/*-0*/);
             }";
 
-        await RunGenerator(Source, DiagDescriptors.LogPropertiesNameCollision);
+        await RunGenerator(Source, DiagDescriptors.TagNameCollision);
     }
 
     [Fact]
@@ -217,15 +223,21 @@ public partial class ParserTests
             class MyClass
             {
                 public int A { get; set; }
+
+                [LogPropertyIgnore]
+                public int B { get; set; }
             }
 
             partial class C
             {
-                [LoggerMessage(0, LogLevel.Debug, ""{param_A}"")]
-                static partial void M(ILogger logger, string param_A, [LogProperties] MyClass /*0+*/param/*-0*/);
+                [LoggerMessage(LogLevel.Debug)]
+                static partial void M0(ILogger logger, string param_A, [LogProperties] MyClass /*0+*/param/*-0*/);
+
+                [LoggerMessage(LogLevel.Debug)]
+                static partial void M1(ILogger logger, string param_B, [LogProperties] MyClass param);
             }";
 
-        await RunGenerator(Source, DiagDescriptors.LogPropertiesNameCollision);
+        await RunGenerator(Source, DiagDescriptors.TagNameCollision);
     }
 
     [Fact]
@@ -251,7 +263,7 @@ public partial class ParserTests
                 static partial void M(ILogger logger, [LogProperties] MyClass /*0+*/param/*-0*/);
             }";
 
-        await RunGenerator(Source, DiagDescriptors.LogPropertiesNameCollision);
+        await RunGenerator(Source, DiagDescriptors.TagNameCollision);
     }
 
     [Theory]
@@ -386,5 +398,95 @@ public partial class ParserTests
             }";
 
         await RunGenerator(Source, DiagDescriptors.LogPropertiesHiddenPropertyDetected);
+    }
+
+    [Fact]
+    public async Task DefaultToString()
+    {
+        await RunGenerator(@"
+            record class MyRecordClass(int x);
+            record struct MyRecordStruct(int x);
+
+            class MyClass2
+            {
+            }
+
+            class MyClass3
+            {
+                public override string ToString() => ""FIND ME!"";
+            }
+
+            class MyClass<T>
+            {
+                public object /*0+*/P0/*-0*/ { get; set; }
+                public MyClass2 /*1+*/P1/*-1*/ { get; set; }
+                public MyClass3 P2 { get; set; }
+                public int P3 { get; set; }
+                public System.Numerics.BigInteger P4 { get; set; }
+                public T P5 { get; set; }
+            }
+
+            partial class C<T>
+            {
+                [LoggerMessage(LogLevel.Debug)]
+                static partial void M0(this ILogger logger,
+                    object /*2+*/p0/*-2*/,
+                    MyClass2 /*3+*/p1/*-3*/,
+                    MyClass3 p2,
+                    [LogProperties] MyClass<int> p3,
+                    T p4,
+                    MyRecordClass p5,
+                    MyRecordStruct p6);
+            }", DiagDescriptors.DefaultToString);
+    }
+
+    [Fact]
+    public async Task ClassWithNullableProperty()
+    {
+        string source = @"
+                namespace Test
+                {
+                    using System;
+
+                    using Microsoft.Extensions.Logging;
+
+                    internal static class LoggerUtils
+                    {
+                        public class MyClassWithNullableProperty
+                        {
+                            public DateTime? NullableDateTime { get; set; }
+                            public DateTime NonNullableDateTime { get; set; }
+                        }
+
+                        partial class MyLogger
+                        {
+                            [LoggerMessage(0, LogLevel.Information, ""Testing nullable property within class here..."")]
+                            public static partial void LogMethodNullablePropertyInClassMatchesNonNullable(ILogger logger, [LogProperties] MyClassWithNullableProperty classWithNullablePropertyParam);
+                        }
+                    }
+                }";
+
+#if NET6_0_OR_GREATER
+        var symbols = new[] { "NET7_0_OR_GREATER", "NET6_0_OR_GREATER", "NET5_0_OR_GREATER" };
+#else
+        var symbols = new[] { "NET5_0_OR_GREATER" };
+#endif
+
+        var (d, r) = await RoslynTestUtils.RunGenerator(
+            new LoggingGenerator(),
+            new[]
+            {
+                Assembly.GetAssembly(typeof(ILogger))!,
+                Assembly.GetAssembly(typeof(LogPropertiesAttribute))!,
+                Assembly.GetAssembly(typeof(LoggerMessageAttribute))!,
+                Assembly.GetAssembly(typeof(DateTime))!,
+            },
+            [source],
+            symbols);
+
+        Assert.Empty(d);
+        await Verifier.Verify(r[0].SourceText.ToString())
+            .AddScrubber(_ => _.Replace(GeneratorUtilities.CurrentVersion, "VERSION"))
+            .UseDirectory(Path.Combine("..", "Verified"));
     }
 }

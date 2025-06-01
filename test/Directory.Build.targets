@@ -4,17 +4,18 @@
   <ItemGroup>
     <PackageReference Include="AutoFixture.AutoMoq" />
     <PackageReference Include="autofixture" />
-    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="AwesomeAssertions" />
     <PackageReference Include="Moq.AutoMock" />
     <PackageReference Include="Moq" />
     <PackageReference Include="StrongNamer" Condition="'$(SignArtifacts)' == 'true' " />
+    <PackageReference Include="Verify.Xunit" />
     <PackageReference Include="Xunit.Combinatorial" />
 
     <Content Include="$(MSBuildThisFileDirectory)\..\eng\xunit.runner.json" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(IsUnitTestProject)' == 'true'">
-    <ProjectReference Include="$(MSBuildThisFileDirectory)\TestUtilities\TestUtilities.csproj" />
-  </ItemGroup>
-
+  <PropertyGroup>
+    <!-- Stop complaining about enabling /doc for tests -->
+    <NoWarn>$(NoWarn);RT0000</NoWarn>
+  </PropertyGroup>
 </Project>

@@ -3,6 +3,7 @@
 
 using System;
 using System.Net.Http;
+using System.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
@@ -93,7 +94,7 @@ public static partial class ResilienceHttpClientBuilderExtensions
                 requestMessage.SetResilienceContext(args.ActionContext);
 
                 // replace the request message
-                args.ActionContext.Properties.Set(ResilienceKeys.RequestMessage, requestMessage);
+                args.ActionContext.SetRequestMessage(requestMessage);
 
                 if (args.PrimaryContext.Properties.TryGetValue(ResilienceKeys.RoutingStrategy, out var routingPipeline))
                 {
@@ -118,8 +119,8 @@ public static partial class ResilienceHttpClientBuilderExtensions
             var routingOptions = context.GetOptions<RequestRoutingOptions>(routingBuilder.Name);
 
             _ = builder
-                .AddStrategy(_ => new RoutingResilienceStrategy(routingOptions.RoutingStrategyProvider), new EmptyResilienceStrategyOptions())
-                .AddStrategy(_ => new RequestMessageSnapshotStrategy(), new EmptyResilienceStrategyOptions())
+                .AddStrategy(_ => new RoutingResilienceStrategy(routingOptions.RoutingStrategyProvider))
+                .AddStrategy(_ => new RequestMessageSnapshotStrategy())
                 .AddTimeout(options.TotalRequestTimeout)
                 .AddHedging(options.Hedging);
         });
@@ -139,15 +140,14 @@ public static partial class ResilienceHttpClientBuilderExtensions
             })
             .SelectPipelineByAuthority();
 
+        // Disable the HttpClient timeout to allow the timeout strategies to control the timeout.
+        _ = builder.ConfigureHttpClient(client => client.Timeout = Timeout.InfiniteTimeSpan);
+
         return new StandardHedgingHandlerBuilder(builder.Name, builder.Services, routingBuilder);
     }
 
-    private record StandardHedgingHandlerBuilder(
+    private sealed record StandardHedgingHandlerBuilder(
         string Name,
         IServiceCollection Services,
         IRoutingStrategyBuilder RoutingStrategyBuilder) : IStandardHedgingHandlerBuilder;
-
-    private sealed class EmptyResilienceStrategyOptions : ResilienceStrategyOptions
-    {
-    }
 }

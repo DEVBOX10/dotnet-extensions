@@ -1,6 +1,6 @@
 # Microsoft.Extensions.Diagnostics.ResourceMonitoring
 
-Measures and reports processor and memory usage.
+Measures and reports processor and memory usage. This library utilizes control groups (cgroups) in Linux to monitor system resources. Both cgroups v1 and v2 are supported.
 
 ## Install the package
 

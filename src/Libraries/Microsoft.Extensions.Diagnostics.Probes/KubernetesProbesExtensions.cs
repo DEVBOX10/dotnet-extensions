@@ -47,13 +47,20 @@ public static class KubernetesProbesExtensions
         _ = Throw.IfNull(services);
         _ = Throw.IfNull(configure);
 
+        _ = services
+            .AddOptionsWithValidateOnStart<KubernetesProbesOptions, KubernetesProbesOptionsValidator>()
+            .Configure(configure);
+
         var wrapperOptions = new KubernetesProbesOptions();
 
         return services
-            .AddTcpEndpointHealthCheck(ProbeTags.Liveness, options =>
+            .AddTcpEndpointProbe(ProbeTags.Liveness, options =>
             {
+                options.TcpPort = wrapperOptions.LivenessProbe.TcpPort;
                 wrapperOptions.LivenessProbe = options;
+
                 configure(wrapperOptions);
+
                 var originalPredicate = options.FilterChecks;
                 if (originalPredicate == null)
                 {
@@ -64,10 +71,13 @@ public static class KubernetesProbesExtensions
                     options.FilterChecks = (check) => check.Tags.Contains(ProbeTags.Liveness) && originalPredicate(check);
                 }
             })
-            .AddTcpEndpointHealthCheck(ProbeTags.Startup, options =>
+            .AddTcpEndpointProbe(ProbeTags.Startup, options =>
             {
+                options.TcpPort = wrapperOptions.StartupProbe.TcpPort;
                 wrapperOptions.StartupProbe = options;
+
                 configure(wrapperOptions);
+
                 var originalPredicate = options.FilterChecks;
                 if (originalPredicate == null)
                 {
@@ -78,10 +88,13 @@ public static class KubernetesProbesExtensions
                     options.FilterChecks = (check) => check.Tags.Contains(ProbeTags.Startup) && originalPredicate(check);
                 }
             })
-            .AddTcpEndpointHealthCheck(ProbeTags.Readiness, (options) =>
+            .AddTcpEndpointProbe(ProbeTags.Readiness, (options) =>
             {
+                options.TcpPort = wrapperOptions.ReadinessProbe.TcpPort;
                 wrapperOptions.ReadinessProbe = options;
+
                 configure(wrapperOptions);
+
                 var originalPredicate = options.FilterChecks;
                 if (originalPredicate == null)
                 {

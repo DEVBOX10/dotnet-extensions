@@ -2,11 +2,12 @@
   <PropertyGroup>
     <RootNamespace>Microsoft.Gen.ContextualOptions</RootNamespace>
     <Description>Code generator to support Microsoft.Extensions.Options.Contextual.</Description>
-    <Workstream>Fundamentals</Workstream>
+    <Workstream>Configuration</Workstream>
   </PropertyGroup>
 
   <PropertyGroup>
     <AnalyzerLanguage>cs</AnalyzerLanguage>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <InjectIsExternalInitOnLegacy>true</InjectIsExternalInitOnLegacy>
   </PropertyGroup>
 
